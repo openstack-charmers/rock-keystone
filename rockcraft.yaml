@@ -5,71 +5,25 @@ description: |
   Ubuntu distribution of OpenStack Keystone
 version: yoga
 
-base: ubuntu:20.04
+base: ubuntu:22.04
 platforms:
   amd64:
 
+# Disabled until rockcraft supports 
+# overlay packages from repositories
+# package-repositories:
+#   - type: apt
+#     cloud: antelope
+#     priority: always
+
+services:
+  wsgi-keystone:
+    override: replace
+    command: apachectl -D FOREGROUND
+
 parts:
-  cloud-archive:
-    plugin: nil
-    build-packages:
-      - ubuntu-cloud-keyring
-      - software-properties-common
-    override-pull: |
-      add-apt-repository cloud-archive:yoga
-      apt update
-
-  deps:
-    after: [cloud-archive]
-    plugin: nil
-    stage-packages:
-      # Note (gboutry): a2enmod needs env and sh utilities
-      - coreutils # needed by a2enmod
-      - dash # needed by a2endmod and chroot
-      # Note (gboutry): a2ensite needs find utilitly
-      - findutils
-
-  keystone:
-    after: [cloud-archive]
-    plugin: nil
-    stage-packages:
-      - apache2
-      - keystone
-      - sudo # Note (gboutry): required by charm-keystone-k8s / present in kolla images
-
-    # Note (gboutry): /usr/share/perl/5.30 is a symlink to
-    # 5.30.0 made in post install scripts. Post install scripts
-    # are not executed when packages are staged/primed.
-    # FIXME: canonical/rockcraft#208
-    # override-prime: |
-    #   craftctl default
-    #   ln -srf $CRAFT_PRIME/usr/share/perl/5.30.0 $CRAFT_PRIME/usr/share/perl/5.30
-
-  apache2-modules:
-    after: [keystone, deps]
-    plugin: nil
-    override-prime: |
-      craftctl default
-      chroot $CRAFT_PRIME
-
-      # Enable default mpm mod
-      a2enmod -m -q mpm_event
-
-      # Enable default mods
-      for module in authz_host auth_basic access_compat authn_file \
-        authz_user alias dir autoindex env mime negotiation setenvif \
-        filter deflate status reqtimeout;
-      do
-        a2enmod -m -q $module
-      done
-
-      # Enable Keystone required mods
-      a2enmod -m -q wsgi
-
   keystone-user:
-    after: [keystone]
     plugin: nil
-    # 42425:42425 for kolla compatibility
     overlay-script: |
       groupadd --root $CRAFT_OVERLAY --gid 42425 --system keystone
       useradd \
@@ -81,10 +35,16 @@ parts:
         --system \
         --shell /bin/false \
         keystone
-    override-prime: |
-      craftctl default
-      chroot $CRAFT_PRIME
-      chown 42425 /var/log/keystone
-      chmod 0750 /var/log/keystone
-      chown --recursive 42425:42425 /var/lib/keystone
-      chmod --recursive 0755 /var/lib/keystone
+
+  keystone:
+    after: [keystone-user]
+    plugin: nil
+    overlay-packages:
+      - sudo
+      # Note (gboutry): required by keystone / present in kolla images
+      - keystone
+    overlay:
+      # Note (gboutry): keystone is enabled by default, conflicts with wsgi-keystone
+      # templated by charm-keystone-k8s, this only removes the symlink, not the actual
+      # file
+      - -etc/apache2/sites-enabled/keystone.conf
