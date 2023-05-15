@@ -3,7 +3,7 @@ summary: Openstack Keystone
 license: Apache-2.0
 description: |
   Ubuntu distribution of OpenStack Keystone
-version: yoga
+version: antelope
 
 base: ubuntu:22.04
 platforms:
@@ -22,29 +22,19 @@ services:
     command: apachectl -D FOREGROUND
 
 parts:
-  keystone-user:
-    plugin: nil
-    overlay-script: |
-      groupadd --root $CRAFT_OVERLAY --gid 42425 --system keystone
-      useradd \
-        --gid keystone \
-        --uid 42425 \
-        --no-create-home \
-        --home /var/lib/keystone \
-        --root $CRAFT_OVERLAY \
-        --system \
-        --shell /bin/false \
-        keystone
-
   keystone:
-    after: [keystone-user]
     plugin: nil
     overlay-packages:
-      - sudo
-      # Note (gboutry): required by keystone / present in kolla images
-      - keystone
-    overlay:
-      # Note (gboutry): keystone is enabled by default, conflicts with wsgi-keystone
-      # templated by charm-keystone-k8s, this only removes the symlink, not the actual
-      # file
-      - -etc/apache2/sites-enabled/keystone.conf
+      - software-properties-common
+    overlay-script: |
+      mount /etc/resolv.conf $CRAFT_OVERLAY/etc/resolv.conf --bind
+      mount proc $CRAFT_OVERLAY/proc -t proc
+      mount sysfs $CRAFT_OVERLAY/sys -t sysfs
+      mount /dev $CRAFT_OVERLAY/dev --rbind --make-private
+      chroot $CRAFT_OVERLAY add-apt-repository cloud-archive:antelope
+      chroot $CRAFT_OVERLAY apt update
+      chroot $CRAFT_OVERLAY bash -c "DEBIAN_FRONTEND=noninteractive apt install sudo keystone --yes"
+      umount --recursive $CRAFT_OVERLAY/dev
+      umount $CRAFT_OVERLAY/sys
+      umount $CRAFT_OVERLAY/proc
+      umount $CRAFT_OVERLAY/etc/resolv.conf
